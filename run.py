@@ -1,4 +1,7 @@
 from bluelog import create_app
+import sys
+
+sys.path.append('/app')
 
 app = create_app()
 
