@@ -32,7 +32,9 @@ def create_app(config_name=None):
     app = Flask('bluelog')
     app.config.from_object(config[config_name])
 
+    # 加载日志配置
     register_logging(app)
+    # 加载扩展
     register_extensions(app)
     register_blueprints(app)
     register_commands(app)
