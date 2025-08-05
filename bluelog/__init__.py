@@ -18,6 +18,7 @@ from flask_wtf.csrf import CSRFError
 from bluelog.blueprints.admin import admin_bp
 from bluelog.blueprints.auth import auth_bp
 from bluelog.blueprints.blog import blog_bp
+from bluelog.blueprints.ai import ai_bp, AIClient
 from bluelog.extensions import bootstrap, db, login_manager, csrf, ckeditor, mail, moment, toolbar, migrate
 from bluelog.models import Admin, Post, Category, Comment, Link
 from bluelog.settings import config
@@ -31,6 +32,9 @@ def create_app(config_name=None):
 
     app = Flask('bluelog')
     app.config.from_object(config[config_name])
+
+    # 初始化全局AI客户端
+    app.ai_client = AIClient()
 
     # 加载日志配置
     register_logging(app)
@@ -95,6 +99,7 @@ def register_blueprints(app):
     app.register_blueprint(blog_bp)
     app.register_blueprint(admin_bp, url_prefix='/admin')
     app.register_blueprint(auth_bp, url_prefix='/auth')
+    app.register_blueprint(ai_bp, url_prefix='/ai')
 
 
 def register_shell_context(app):
@@ -118,22 +123,16 @@ def register_template_context(app):
             links=links, unread_comments=unread_comments)
 
 
-def register_errors(app):
-    @app.errorhandler(400)
-    def bad_request(e):
-        return render_template('errors/400.html'), 400
-
-    @app.errorhandler(404)
-    def page_not_found(e):
-        return render_template('errors/404.html'), 404
-
-    @app.errorhandler(500)
-    def internal_server_error(e):
-        return render_template('errors/500.html'), 500
-
-    @app.errorhandler(CSRFError)
-    def handle_csrf_error(e):
-        return render_template('errors/400.html', description=e.description), 400
+def register_request_handlers(app):
+    @app.after_request
+    def query_profiler(response):
+        for q in get_debug_queries():
+            if q.duration >= app.config['BLUELOG_SLOW_QUERY_THRESHOLD']:
+                app.logger.warning(
+                    'Slow query: Duration: %fs\n Context: %s\nQuery: %s\n '
+                    % (q.duration, q.context, q.statement)
+                )
+        return response
 
 
 def register_commands(app):
@@ -213,13 +212,19 @@ def register_commands(app):
         click.echo('Done.')
 
 
-def register_request_handlers(app):
-    @app.after_request
-    def query_profiler(response):
-        for q in get_debug_queries():
-            if q.duration >= app.config['BLUELOG_SLOW_QUERY_THRESHOLD']:
-                app.logger.warning(
-                    'Slow query: Duration: %fs\n Context: %s\nQuery: %s\n '
-                    % (q.duration, q.context, q.statement)
-                )
-        return response
+def register_errors(app):
+    @app.errorhandler(400)
+    def bad_request(e):
+        return render_template('errors/400.html'), 400
+
+    @app.errorhandler(404)
+    def page_not_found(e):
+        return render_template('errors/404.html'), 404
+
+    @app.errorhandler(500)
+    def internal_server_error(e):
+        return render_template('errors/500.html'), 500
+
+    @app.errorhandler(CSRFError)
+    def handle_csrf_error(e):
+        return render_template('errors/400.html', description=e.description), 400

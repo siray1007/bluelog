@@ -1,0 +1,174 @@
+{% extends 'base.html' %}
+
+{% block title %}AI Assistant{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>AI Assistant</h1>
+</div>
+<div class="row">
+    <div class="col-lg-12">
+        <div class="card">
+            <div class="card-body">
+                <div id="chat-container">
+                    <div id="chat-history" class="chat-history">
+                        <div class="message system-message">
+                            <div class="message-content">您好！我是AI助手，有什么我可以帮您的吗？</div>
+                        </div>
+                    </div>
+                    <div class="chat-input-area">
+                        <form id="chat-form">
+                            <div class="form-group">
+                                <textarea id="user-input" class="form-control" rows="3" placeholder="请输入您的问题..."></textarea>
+                            </div>
+                            <button type="submit" id="send-btn" class="btn btn-primary">发送</button>
+                            <button type="button" id="clear-btn" class="btn btn-secondary">清空历史</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+    $(function() {
+        let chatHistory = [];
+        
+        // 发送消息表单处理
+        $('#chat-form').on('submit', function(e) {
+            e.preventDefault();
+            
+            const userMessage = $('#user-input').val().trim();
+            if (!userMessage) {
+                alert('请输入消息内容');
+                return;
+            }
+            
+            // 添加用户消息到聊天历史
+            addMessageToHistory('user', userMessage);
+            
+            // 清空输入框
+            $('#user-input').val('');
+            
+            // 禁用发送按钮
+            $('#send-btn').prop('disabled', true).text('发送中...');
+            
+            // 发送请求到后端
+            $.ajax({
+                url: "{{ url_for('ai.chat') }}",
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    message: userMessage,
+                    history: chatHistory
+                }),
+                success: function(data) {
+                    if (data.error) {
+                        addMessageToHistory('error', data.error);
+                    } else {
+                        // 添加AI回复到聊天历史
+                        addMessageToHistory('assistant', data.response);
+                        // 更新聊天历史
+                        chatHistory = data.history;
+                    }
+                },
+                error: function(xhr, status, error) {
+                    addMessageToHistory('error', '发送消息失败: ' + error);
+                },
+                complete: function() {
+                    // 重新启用发送按钮
+                    $('#send-btn').prop('disabled', false).text('发送');
+                    // 滚动到底部
+                    scrollToBottom();
+                }
+            });
+        });
+        
+        // 清空聊天历史
+        $('#clear-btn').on('click', function() {
+            $('#chat-history').empty();
+            chatHistory = [];
+            // 添加系统欢迎消息
+            addMessageToHistory('system', '您好！我是AI助手，有什么我可以帮您的吗？');
+        });
+        
+        // 添加消息到聊天历史
+        function addMessageToHistory(role, content) {
+            const messageClass = role + '-message';
+            const messageDiv = $('<div class="message ' + messageClass + '"></div>');
+            const contentDiv = $('<div class="message-content"></div>').text(content);
+            
+            messageDiv.append(contentDiv);
+            $('#chat-history').append(messageDiv);
+            
+            // 滚动到底部
+            scrollToBottom();
+            
+            // 如果不是系统消息和错误消息，添加到历史记录数组
+            if (role !== 'system' && role !== 'error') {
+                chatHistory.push({role: role, content: content});
+            }
+        }
+        
+        // 滚动到底部
+        function scrollToBottom() {
+            const chatHistory = $('#chat-history');
+            chatHistory.scrollTop(chatHistory[0].scrollHeight);
+        }
+    });
+</script>
+<style>
+    .chat-history {
+        height: 500px;
+        overflow-y: auto;
+        padding: 15px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        margin-bottom: 20px;
+        background-color: #f8f9fa;
+    }
+    
+    .message {
+        margin-bottom: 15px;
+        padding: 10px;
+        border-radius: 5px;
+    }
+    
+    .user-message {
+        background-color: #007bff;
+        color: white;
+        margin-left: 20%;
+    }
+    
+    .assistant-message {
+        background-color: #e9ecef;
+        color: #212529;
+        margin-right: 20%;
+    }
+    
+    .system-message {
+        background-color: #28a745;
+        color: white;
+        text-align: center;
+    }
+    
+    .error-message {
+        background-color: #dc3545;
+        color: white;
+        text-align: center;
+    }
+    
+    .message-content {
+        word-wrap: break-word;
+        white-space: pre-wrap;
+    }
+    
+    .chat-input-area {
+        margin-top: 20px;
+    }
+</style>
+{% endblock %}

@@ -44,6 +44,10 @@ class BaseConfig(object):
     BLUELOG_THEMES = {'perfect_blue': 'Perfect Blue', 'black_swan': 'Black Swan'}
     BLUELOG_SLOW_QUERY_THRESHOLD = 1
 
+    AI_API_KEY = os.getenv('AI_API_KEY', 'sk-0b41758d30e0441d9a90a69c74cbbb35')
+    AI_BASE_URL = os.getenv('AI_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
+    AI_MODEL = os.getenv('AI_MODEL', 'deepseek-r1-0528')
+
     BLUELOG_UPLOAD_PATH = os.path.join(basedir, 'uploads')
     BLUELOG_ALLOWED_IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif']
 
