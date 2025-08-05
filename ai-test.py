@@ -2,30 +2,32 @@ import threading
 import time
 from openai import OpenAI
 from typing import List, Dict, Any, Optional
-import os
 
 
 class AIClient:
     """AI客户端类,用于与AI模型进行交互"""
-
     def __init__(self):
-        """初始化AI客户端"""
+        # 从环境变量获取API密钥，避免硬编码敏感信息
+        api_key = "sk-0b41758d30e0441d9a90a69c74cbbb35"
+        if not api_key:
+            raise ValueError("未找到环境变量 DEEPSEEK_API_KEY,请先配置")
+
         self.client = OpenAI(
-            # 若没有配置环境变量，请用百炼API Key将下行替换为：api_key="sk-xxx",
-            api_key=os.getenv("DASHSCOPE_API_KEY", "sk-0b41758d30e0441d9a90a69c74cbbb35"),
+            api_key=api_key,
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         )
-        self.model = "qwen-plus"
+        self.model = "deepseek-r1"
 
     def test_connection(self) -> None:
         """
-        测试Qwen-Plus模型功能
+        测试DeepSeek模型功能
         """
         print("正在测试模型连接...")
         try:
             completion = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": "你好"}],
+                timeout=30  # 设置超时时间
             )
             print("模型连接测试成功！")
             print(f"响应: {completion.choices[0].message.content}")
@@ -41,11 +43,41 @@ class AIClient:
 
         Returns:
             模型响应结果
+
+        Raises:
+            Exception: 当API调用失败时抛出异常
         """
-        return self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-        )
+        try:
+            return self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                timeout=60  # 设置超时时间
+            )
+        except Exception as e:
+            raise Exception(f"获取模型响应失败: {str(e)}")
+
+    def get_completion_stream(self, messages: List[Dict[str, str]]) -> Any:
+        """
+        获取模型流式完成响应
+
+        Args:
+            messages: 对话历史消息
+
+        Returns:
+            模型流式响应结果
+
+        Raises:
+            Exception: 当API调用失败时抛出异常
+        """
+        try:
+            return self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                stream=True,
+                timeout=60  # 设置超时时间
+            )
+        except Exception as e:
+            raise Exception(f"获取流式模型响应失败: {str(e)}")
 
 
 class ChatApplication:
@@ -53,7 +85,12 @@ class ChatApplication:
 
     def __init__(self):
         """初始化聊天应用"""
-        self.ai_client = AIClient()
+        try:
+            self.ai_client = AIClient()
+        except ValueError as e:
+            print(f"AI客户端初始化失败: {e}")
+            exit(1)
+
         self.messages: List[Dict[str, str]] = []
         self._initialize_messages()
 
@@ -80,7 +117,7 @@ class ChatApplication:
         """
         while not stop_event.is_set():
             elapsed = time.time() - start_time
-            print(f"\r助手: 请等待 (已等待: {elapsed:.2f}秒)", end='', flush=True)
+            print(f"\r助手: 请等待 (耗时: {elapsed:.2f}秒)", end='', flush=True)
             time.sleep(0.1)
 
     def handle_user_command(self, user_input: str) -> tuple[bool, bool]:
@@ -134,6 +171,7 @@ class ChatApplication:
             是否成功处理输入
         """
         if not user_input.strip():
+            print("输入不能为空，请重新输入。")
             return False
 
         # 添加用户消息到历史
@@ -147,36 +185,47 @@ class ChatApplication:
         Returns:
             助手回复内容,如果出错返回None
         """
+        start_time = time.time()  # 在开始处理前记录时间
         stop_event = threading.Event()
-        start_time = time.time()
         wait_thread = None
+        elapsed_time_at_api_call = 0
 
         try:
             # 启动等待时间显示线程
             wait_thread = threading.Thread(
                 target=self.show_waiting_message,
-                args=(stop_event, start_time)
+                args=(stop_event, start_time),
+                daemon=True  # 设置为守护线程，主程序退出时自动结束
             )
             wait_thread.start()
 
-            # 调用模型API
-            completion = self.ai_client.get_completion(self.messages)
+            # 调用模型API (使用流式)
+            stream = self.ai_client.get_completion_stream(self.messages)
+
+            # 记录API调用完成时的时间
+            elapsed_time_at_api_call = time.time() - start_time
 
             # 停止等待时间显示线程
             stop_event.set()
             if wait_thread.is_alive():
                 wait_thread.join(timeout=1)
 
-            # 计算总等待时间
-            elapsed_time = time.time() - start_time
+            # 结束等待提示并在新行显示助手回复
+            print()  # 换行，保留等待提示信息
+            print("助手: ", end='', flush=True)
 
-            # 清除等待提示并回到行首
-            print("\r" + " " * 50 + "\r", end='')
+            # 处理流式响应
+            assistant_reply = ""
+            for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content is not None:
+                    content = chunk.choices[0].delta.content
+                    assistant_reply += content
+                    print(content, end='', flush=True)
 
-            # 获取助手回复
-            assistant_reply = completion.choices[0].message.content
-            print(f"助手: {assistant_reply}")
-            print(f"     (响应时间: {elapsed_time:.2f}秒)")
+            print()  # 换行
+
+            # 计算总耗时（使用API调用完成时的时间，保持一致性）
+            print(f"     (总耗时: {elapsed_time_at_api_call:.2f}秒)")
 
             # 添加助手回复到历史
             self.messages.append({"role": "assistant", "content": assistant_reply})
@@ -189,8 +238,8 @@ class ChatApplication:
             if wait_thread and wait_thread.is_alive():
                 wait_thread.join(timeout=1)
 
-            # 清除等待提示并回到行首
-            print("\r" + " " * 50 + "\r", end='')
+            # 结束等待提示并显示错误信息
+            print()  # 换行，保留等待提示信息
             print(f"错误: {e}")
             return None
 
@@ -209,6 +258,10 @@ class ChatApplication:
 
             except KeyboardInterrupt:
                 print("\n\n程序被用户中断，再见！")
+                break
+            except EOFError:
+                # 处理输入流结束的情况（如Ctrl+D）
+                print("\n\n输入流结束，程序退出。")
                 break
             except Exception as e:
                 print(f"发生未预期的错误: {e}")
@@ -243,9 +296,13 @@ class ChatApplication:
 
 def main() -> None:
     """主函数"""
-    # 创建并测试AI客户端
-    ai_client = AIClient()
-    ai_client.test_connection()
+    try:
+        # 创建并测试AI客户端
+        ai_client = AIClient()
+        ai_client.test_connection()
+    except Exception as e:
+        print(f"AI客户端测试失败: {e}")
+        return
 
     # 运行聊天应用
     app = ChatApplication()
