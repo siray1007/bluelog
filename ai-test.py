@@ -16,7 +16,7 @@ class AIClient:
             api_key=api_key,
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         )
-        self.model = "deepseek-r1"
+        self.model = "deepseek-r1-0528"
 
     def test_connection(self) -> None:
         """
@@ -107,17 +107,15 @@ class ChatApplication:
         print("  'clear' - 清除对话历史")
         print("-" * 50)
 
-    def show_waiting_message(self, stop_event: threading.Event, start_time: float) -> None:
+    def _show_simple_waiting_message(self, stop_event: threading.Event) -> None:
         """
-        显示等待消息
+        显示简单的等待消息
 
         Args:
             stop_event: 用于控制线程停止的事件
-            start_time: 开始时间
         """
+        print("助手: 请等待", end='', flush=True)
         while not stop_event.is_set():
-            elapsed = time.time() - start_time
-            print(f"\r助手: 请等待 (耗时: {elapsed:.2f}秒)", end='', flush=True)
             time.sleep(0.1)
 
     def handle_user_command(self, user_input: str) -> tuple[bool, bool]:
@@ -188,13 +186,12 @@ class ChatApplication:
         start_time = time.time()  # 在开始处理前记录时间
         stop_event = threading.Event()
         wait_thread = None
-        elapsed_time_at_api_call = 0
 
         try:
-            # 启动等待时间显示线程
+            # 启动简单的等待提示线程
             wait_thread = threading.Thread(
-                target=self.show_waiting_message,
-                args=(stop_event, start_time),
+                target=self._show_simple_waiting_message,
+                args=(stop_event,),
                 daemon=True  # 设置为守护线程，主程序退出时自动结束
             )
             wait_thread.start()
@@ -202,15 +199,12 @@ class ChatApplication:
             # 调用模型API (使用流式)
             stream = self.ai_client.get_completion_stream(self.messages)
 
-            # 记录API调用完成时的时间
-            elapsed_time_at_api_call = time.time() - start_time
-
-            # 停止等待时间显示线程
+            # 停止等待提示线程
             stop_event.set()
             if wait_thread.is_alive():
                 wait_thread.join(timeout=1)
 
-            # 结束等待提示并在新行显示助手回复
+            # 换行并在新行显示助手回复
             print()  # 换行，保留等待提示信息
             print("助手: ", end='', flush=True)
 
@@ -224,8 +218,9 @@ class ChatApplication:
 
             print()  # 换行
 
-            # 计算总耗时（使用API调用完成时的时间，保持一致性）
-            print(f"     (总耗时: {elapsed_time_at_api_call:.2f}秒)")
+            # 计算总耗时
+            elapsed_time = time.time() - start_time
+            print(f"     (总耗时: {elapsed_time:.2f}秒)")
 
             # 添加助手回复到历史
             self.messages.append({"role": "assistant", "content": assistant_reply})
@@ -233,7 +228,7 @@ class ChatApplication:
             return assistant_reply
 
         except Exception as e:
-            # 停止等待时间显示线程
+            # 停止等待提示线程
             stop_event.set()
             if wait_thread and wait_thread.is_alive():
                 wait_thread.join(timeout=1)
