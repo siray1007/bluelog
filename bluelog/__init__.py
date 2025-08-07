@@ -99,6 +99,7 @@ def register_blueprints(app):
     app.register_blueprint(blog_bp)
     app.register_blueprint(admin_bp, url_prefix='/admin')
     app.register_blueprint(auth_bp, url_prefix='/auth')
+    csrf.exempt(ai_bp)
     app.register_blueprint(ai_bp, url_prefix='/ai')
 
 

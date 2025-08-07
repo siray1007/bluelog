@@ -11,6 +11,8 @@ services:
     environment:
       - ENV=development
       - PYTHONPATH=/app
+    env_file:
+      - .flaskenv
     command: python run.py
     restart: always
     networks:

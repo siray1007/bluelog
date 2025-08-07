@@ -2,38 +2,15 @@
 
 {% block title %}AI Assistant{% endblock %}
 
-{% block content %}
-<div class="page-header">
-    <h1>AI Assistant</h1>
-</div>
-<div class="row">
-    <div class="col-lg-12">
-        <div class="card">
-            <div class="card-body">
-                <div id="chat-container">
-                    <div id="chat-history" class="chat-history">
-                        <div class="message system-message">
-                            <div class="message-content">您好！我是AI助手，有什么我可以帮您的吗？</div>
-                        </div>
-                    </div>
-                    <div class="chat-input-area">
-                        <form id="chat-form">
-                            <div class="form-group">
-                                <textarea id="user-input" class="form-control" rows="3" placeholder="请输入您的问题..."></textarea>
-                            </div>
-                            <button type="submit" id="send-btn" class="btn btn-primary">发送</button>
-                            <button type="button" id="clear-btn" class="btn btn-secondary">清空历史</button>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-{% endblock %}
-
 {% block scripts %}
 {{ super() }}
+<script src="https://code.jquery.com/jquery-3.2.1.min.js" 
+            integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" 
+            crossorigin="anonymous"></script>
+    <script type="text/javascript" src="{{ url_for('static', filename='js/popper.min.js') }}"></script>
+    <script type="text/javascript" src="{{ url_for('static', filename='js/bootstrap.min.js') }}"></script>
+    <script type="text/javascript" src="{{ url_for('static', filename='js/script.js') }}"></script>
+    {{ moment.include_moment(local_js=url_for('static', filename='js/moment-with-locales.min.js')) }}
 <script>
     $(function() {
         let chatHistory = [];
@@ -171,4 +148,34 @@
         margin-top: 20px;
     }
 </style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>AI Assistant</h1>
+</div>
+<div class="row">
+    <div class="col-lg-12">
+        <div class="card">
+            <div class="card-body">
+                <div id="chat-container">
+                    <div id="chat-history" class="chat-history">
+                        <div class="message system-message">
+                            <div class="message-content">您好！我是AI助手，有什么我可以帮您的吗？</div>
+                        </div>
+                    </div>
+                    <div class="chat-input-area">
+                        <form id="chat-form">
+                            <div class="form-group">
+                                <textarea id="user-input" class="form-control" rows="3" placeholder="请输入您的问题..."></textarea>
+                            </div>
+                            <button type="submit" id="send-btn" class="btn btn-primary">发送</button>
+                            <button type="button" id="clear-btn" class="btn btn-secondary">清空历史</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}

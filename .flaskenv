@@ -1,2 +1,3 @@
 FLASK_APP=bluelog
-#FLASK_ENV=development
+FLASK_ENV=development
+AI_API_KEY=sk-0b41758d30e0441d9a90a69c74cbbb35
