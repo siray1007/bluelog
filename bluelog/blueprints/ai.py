@@ -32,6 +32,14 @@ class AIClient:
             base_url = current_app.config.get('AI_BASE_URL')
             model = current_app.config.get('AI_MODEL')
 
+            # 清除任何可能的代理配置残留（新增）
+            # 确保环境变量中没有意外设置的代理参数
+            for env_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']:
+                if env_var in os.environ:
+                    current_app.logger.warning(f"环境变量中存在代理配置 {env_var}，可能影响连接")
+                    # 可选：如果需要禁用代理，可以取消下面这行的注释
+                    # del os.environ[env_var]
+
             # 打印配置（脱敏API_KEY）
             current_app.logger.debug(
                 f"Loaded AI config - API_KEY: {'*'*len(api_key) if api_key else 'None'}, "
@@ -47,28 +55,28 @@ class AIClient:
             masked_env_key = '*' * len(env_api_key) if env_api_key else 'None'
             current_app.logger.debug(f"AI_API_KEY from env: {masked_env_key}")
 
-            # 检查必要配置
-            if not api_key:
-                current_app.logger.error("AI_API_KEY is empty in config and environment")
-                raise Exception("AI_API_KEY is not configured. Please check your environment variables.")
+        # 检查必要配置
+        if not api_key:
+            current_app.logger.error("AI_API_KEY is empty in config and environment")
+            raise Exception("AI_API_KEY is not configured. Please check your environment variables.")
 
-            if not base_url:
-                current_app.logger.error("AI_BASE_URL is not configured")
-                raise Exception("AI_BASE_URL is not configured")
+        if not base_url:
+            current_app.logger.error("AI_BASE_URL is not configured")
+            raise Exception("AI_BASE_URL is not configured")
 
-            if not model:
-                current_app.logger.error("AI_MODEL is not configured")
-                raise Exception("AI_MODEL is not configured")
+        if not model:
+            current_app.logger.error("AI_MODEL is not configured")
+            raise Exception("AI_MODEL is not configured")
 
-            # 初始化客户端
-            self.client = OpenAI(
-                api_key=api_key,
-                base_url=base_url,
-            )
-            self.model = model
+        # 初始化客户端 - 确保没有proxies参数
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url=base_url  # 确保这里没有逗号残留导致的语法错误
+        )
+        self.model = model
 
-            # 客户端初始化成功后，记录相关信息
-            current_app.logger.debug(f"Calling model {self.model} at {self.client.base_url}")
+        # 客户端初始化成功后，记录相关信息
+        current_app.logger.debug(f"Calling model {self.model} at {self.client.base_url}")
 
     def get_completion_stream(self, messages: List[Dict[str, str]]) -> Any:
         """
