@@ -10,7 +10,9 @@ from openai import OpenAI
 from typing import List, Dict, Any
 import openai
 import os
-
+import traceback
+import sys
+import datetime
 
 ai_bp = Blueprint('ai', __name__)
 
@@ -30,22 +32,47 @@ class AIClient:
             base_url = current_app.config.get('AI_BASE_URL')
             model = current_app.config.get('AI_MODEL')
 
-            # 记录环境变量和配置值用于调试
-            current_app.logger.debug(f"AI_API_KEY from config: {'*' * len(api_key) if api_key else 'None'}")
+            # 打印配置（脱敏API_KEY）- 拆分为多行
+            current_app.logger.error(
+                f"Loaded AI config - API_KEY: {'*'*len(api_key) if api_key else 'None'}, "
+                f"BASE_URL: {base_url}, MODEL: {model}"
+            )
+
+            # 记录环境变量和配置值用于调试 - 拆分为多行
+            current_app.logger.debug(
+                f"AI_API_KEY from config: {'*' * len(api_key) if api_key else 'None'}"
+            )
             current_app.logger.debug(f"AI_BASE_URL from config: {base_url}")
             current_app.logger.debug(f"AI_MODEL from config: {model}")
+
             env_api_key = os.environ.get('AI_API_KEY', '')
             masked_env_key = '*' * len(env_api_key) if env_api_key else 'None'
             current_app.logger.debug(f"AI_API_KEY from env: {masked_env_key}")
 
-            if not api_key:
-                raise Exception("AI_API_KEY is not configured. Please check your environment variables.")
+        # 检查必要配置
+        if not api_key:
+            current_app.logger.error("AI_API_KEY is empty in config and environment")
+            raise Exception("AI_API_KEY is not configured. Please check your environment variables.")
 
-            self.client = OpenAI(
-                api_key=api_key,
-                base_url=base_url,
-            )
-            self.model = model
+        if not base_url:
+            current_app.logger.error("AI_BASE_URL is not configured")
+            raise Exception("AI_BASE_URL is not configured")
+
+        if not model:
+            current_app.logger.error("AI_MODEL is not configured")
+            raise Exception("AI_MODEL is not configured")
+
+        # 先初始化客户端
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+        )
+        self.model = model
+
+        # 客户端初始化成功后，再访问其属性
+        current_app.logger.debug(
+            f"Calling model {self.model} at {self.client.base_url}"
+        )
 
     def get_completion_stream(self, messages: List[Dict[str, str]]) -> Any:
         """
@@ -178,10 +205,13 @@ def chat():
     except openai.OpenAIError as e:  # 捕获 OpenAI 相关的异常
         current_app.logger.error(f'OpenAI API 调用失败: {str(e)}')
         return jsonify({'error': f'OpenAI API 调用失败: {str(e)}'}), 500
-    except Exception as e:  # 捕获其他异常
-        current_app.logger.error(f'AI服务出错: {str(e)}')
-        import traceback
-        current_app.logger.error(traceback.format_exc())  # 记录完整的堆栈信息
+    except Exception as e:
+        # 强制输出到控制台（Docker logs 能捕获）
+        print("=== AI 聊天接口错误 ===", file=sys.stderr)
+        print(f"时间: {datetime.datetime.now()}", file=sys.stderr)
+        print(f"错误信息: {str(e)}", file=sys.stderr)
+        print("堆栈跟踪:", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         return jsonify({'error': f'AI服务出错: {str(e)}'}), 500
 
 
@@ -194,22 +224,22 @@ def get_ai_response(history):
     """获取AI响应"""
     try:
         current_app.logger.debug("Initializing AI client in get_ai_response")
-        # 初始化AI客户端
         ai_client = AIClient()
-
-        # 获取AI响应
         stream = ai_client.get_completion_stream(history)
 
-        # 处理流式响应
         response_text = ""
         for chunk in stream:
-            if (not hasattr(chunk, 'choices') or not chunk.choices or
-                    not hasattr(chunk.choices[0], 'delta') or
-                    not hasattr(chunk.choices[0].delta, 'content')):
-                current_app.logger.error(f"Invalid response format from AI model: {chunk}")
-                raise Exception("Invalid response format from AI model")
-            if chunk.choices and chunk.choices[0].delta.content is not None:
-                response_text += chunk.choices[0].delta.content
+            # 简化检查：仅关注有内容的chunk
+            if chunk.choices and len(chunk.choices) > 0:
+                delta = chunk.choices[0].delta
+                if hasattr(delta, 'content') and delta.content is not None:
+                    response_text += delta.content
+                # 忽略无内容的chunk（如结束标记）
+            else:
+                current_app.logger.debug(f"Ignoring empty chunk: {chunk}")  # 仅日志记录，不抛出异常
+
+        if not response_text:  # 最终响应为空时才报错
+            raise Exception("AI returned empty response")
 
         return response_text
     except Exception as e:

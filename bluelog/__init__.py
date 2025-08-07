@@ -51,7 +51,6 @@ def create_app(config_name=None):
 
 def register_logging(app):
     class RequestFormatter(logging.Formatter):
-
         def format(self, record):
             record.url = request.url
             record.remote_addr = request.remote_addr
@@ -64,6 +63,10 @@ def register_logging(app):
 
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
+    # 确保日志目录存在
+    if not os.path.exists(os.path.join(basedir, 'logs')):
+        os.makedirs(os.path.join(basedir, 'logs'))
+
     file_handler = RotatingFileHandler(os.path.join(basedir, 'logs/bluelog.log'),
                                        maxBytes=10 * 1024 * 1024, backupCount=10)
     file_handler.setFormatter(formatter)
@@ -72,7 +75,7 @@ def register_logging(app):
     mail_handler = SMTPHandler(
         mailhost=app.config['MAIL_SERVER'],
         fromaddr=app.config['MAIL_USERNAME'],
-        toaddrs=['ADMIN_EMAIL'],
+        toaddrs=['ADMIN_EMAIL'],  # 建议从配置中读取，如 app.config['ADMIN_EMAIL']
         subject='Bluelog Application Error',
         credentials=(app.config['MAIL_USERNAME'], app.config['MAIL_PASSWORD']))
     mail_handler.setLevel(logging.ERROR)
