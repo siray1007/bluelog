@@ -32,16 +32,14 @@ class AIClient:
             base_url = current_app.config.get('AI_BASE_URL')
             model = current_app.config.get('AI_MODEL')
 
-            # 打印配置（脱敏API_KEY）- 拆分为多行
-            current_app.logger.error(
+            # 打印配置（脱敏API_KEY）
+            current_app.logger.debug(
                 f"Loaded AI config - API_KEY: {'*'*len(api_key) if api_key else 'None'}, "
                 f"BASE_URL: {base_url}, MODEL: {model}"
             )
 
-            # 记录环境变量和配置值用于调试 - 拆分为多行
-            current_app.logger.debug(
-                f"AI_API_KEY from config: {'*' * len(api_key) if api_key else 'None'}"
-            )
+            # 记录环境变量和配置值用于调试
+            current_app.logger.debug(f"AI_API_KEY from config: {'*' * len(api_key) if api_key else 'None'}")
             current_app.logger.debug(f"AI_BASE_URL from config: {base_url}")
             current_app.logger.debug(f"AI_MODEL from config: {model}")
 
@@ -49,30 +47,28 @@ class AIClient:
             masked_env_key = '*' * len(env_api_key) if env_api_key else 'None'
             current_app.logger.debug(f"AI_API_KEY from env: {masked_env_key}")
 
-        # 检查必要配置
-        if not api_key:
-            current_app.logger.error("AI_API_KEY is empty in config and environment")
-            raise Exception("AI_API_KEY is not configured. Please check your environment variables.")
+            # 检查必要配置
+            if not api_key:
+                current_app.logger.error("AI_API_KEY is empty in config and environment")
+                raise Exception("AI_API_KEY is not configured. Please check your environment variables.")
 
-        if not base_url:
-            current_app.logger.error("AI_BASE_URL is not configured")
-            raise Exception("AI_BASE_URL is not configured")
+            if not base_url:
+                current_app.logger.error("AI_BASE_URL is not configured")
+                raise Exception("AI_BASE_URL is not configured")
 
-        if not model:
-            current_app.logger.error("AI_MODEL is not configured")
-            raise Exception("AI_MODEL is not configured")
+            if not model:
+                current_app.logger.error("AI_MODEL is not configured")
+                raise Exception("AI_MODEL is not configured")
 
-        # 先初始化客户端
-        self.client = OpenAI(
-            api_key=api_key,
-            base_url=base_url,
-        )
-        self.model = model
+            # 初始化客户端
+            self.client = OpenAI(
+                api_key=api_key,
+                base_url=base_url,
+            )
+            self.model = model
 
-        # 客户端初始化成功后，再访问其属性
-        current_app.logger.debug(
-            f"Calling model {self.model} at {self.client.base_url}"
-        )
+            # 客户端初始化成功后，记录相关信息
+            current_app.logger.debug(f"Calling model {self.model} at {self.client.base_url}")
 
     def get_completion_stream(self, messages: List[Dict[str, str]]) -> Any:
         """
@@ -142,29 +138,6 @@ class AIClient:
             current_app.logger.error(error_msg)
             raise Exception(error_msg)
 
-    def _handle_api_error(self, error_type: str, e: Exception):
-        """
-        处理API相关错误
-
-        Args:
-            error_type: 错误类型描述
-            e: 异常对象
-        """
-        error_msg = f"OpenAI API {error_type}: {str(e)}"
-        current_app.logger.error(error_msg)
-        raise Exception(f"AI服务{error_type}: {str(e)}")
-
-    def _handle_general_error(self, e: Exception):
-        """
-        处理一般性错误
-
-        Args:
-            e: 异常对象
-        """
-        error_msg = f"获取流式模型响应失败: {str(e)}"
-        current_app.logger.error(error_msg)
-        raise Exception(error_msg)
-
 
 @ai_bp.route('/')
 def index():
@@ -233,13 +206,13 @@ def get_ai_response(history):
             if chunk.choices and len(chunk.choices) > 0:
                 delta = chunk.choices[0].delta
                 if hasattr(delta, 'content') and delta.content is not None:
-                    response_text += delta.content
-                # 忽略无内容的chunk（如结束标记）
+                    response_text += delta.content.strip()  # 去除多余空白符
             else:
                 current_app.logger.debug(f"Ignoring empty chunk: {chunk}")  # 仅日志记录，不抛出异常
 
-        if not response_text:  # 最终响应为空时才报错
-            raise Exception("AI returned empty response")
+        # 更严格的空响应检查
+        if not response_text.strip():
+            raise Exception("AI returned empty response. Please try again.")
 
         return response_text
     except Exception as e:
