@@ -18,7 +18,20 @@
         // 发送消息表单处理
         $('#chat-form').on('submit', function(e) {
             e.preventDefault();
-            
+            sendMessage(); // 提取为单独的发送函数
+        });
+
+        // 监听输入框的键盘事件
+        $('#user-input').on('keydown', function(e) {
+            // 当按下回车键且没有按住Shift键时
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault(); // 阻止默认换行行为
+                $('#chat-form').submit(); // 触发表单提交
+            }
+        });
+
+        // 发送消息的函数
+        function sendMessage() {
             const userMessage = $('#user-input').val().trim();
             if (!userMessage) {
                 alert('请输入消息内容');
@@ -63,7 +76,7 @@
                     scrollToBottom();
                 }
             });
-        });
+        }
         
         // 清空聊天历史
         $('#clear-btn').on('click', function() {
