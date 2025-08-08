@@ -6,6 +6,8 @@
     :license: MIT, see LICENSE for more details.
 """
 from flask import render_template, request, current_app, Blueprint, jsonify
+from flask import Response, stream_with_context
+import json
 from openai import OpenAI
 from typing import List, Dict, Any
 import openai
@@ -32,13 +34,10 @@ class AIClient:
             base_url = current_app.config.get('AI_BASE_URL')
             model = current_app.config.get('AI_MODEL')
 
-            # 清除任何可能的代理配置残留（新增）
-            # 确保环境变量中没有意外设置的代理参数
+            # 清除任何可能的代理配置残留
             for env_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']:
                 if env_var in os.environ:
                     current_app.logger.warning(f"环境变量中存在代理配置 {env_var}，可能影响连接")
-                    # 可选：如果需要禁用代理，可以取消下面这行的注释
-                    # del os.environ[env_var]
 
             # 打印配置（脱敏API_KEY）
             current_app.logger.debug(
@@ -55,7 +54,11 @@ class AIClient:
             masked_env_key = '*' * len(env_api_key) if env_api_key else 'None'
             current_app.logger.debug(f"AI_API_KEY from env: {masked_env_key}")
 
-        # 检查必要配置
+        # 检查必要配置 - 修复变量作用域问题
+        api_key = current_app.config.get('AI_API_KEY')
+        base_url = current_app.config.get('AI_BASE_URL')
+        model = current_app.config.get('AI_MODEL')
+
         if not api_key:
             current_app.logger.error("AI_API_KEY is empty in config and environment")
             raise Exception("AI_API_KEY is not configured. Please check your environment variables.")
@@ -68,32 +71,18 @@ class AIClient:
             current_app.logger.error("AI_MODEL is not configured")
             raise Exception("AI_MODEL is not configured")
 
-        # 初始化客户端 - 确保没有proxies参数
+        # 初始化客户端
         self.client = OpenAI(
             api_key=api_key,
-            base_url=base_url  # 确保这里没有逗号残留导致的语法错误
+            base_url=base_url
         )
         self.model = model
 
-        # 客户端初始化成功后，记录相关信息
         current_app.logger.debug(f"Calling model {self.model} at {self.client.base_url}")
 
     def get_completion_stream(self, messages: List[Dict[str, str]]) -> Any:
-        """
-        获取模型流式完成响应
-
-        Args:
-            messages: 对话历史消息
-
-        Returns:
-            模型流式响应结果
-
-        Raises:
-            Exception: 当API调用失败时抛出异常
-        """
-        # 确保客户端已初始化
+        """获取模型流式完成响应"""
         self._initialize_client()
-
         return self._make_api_call(messages)
 
     def _make_api_call(self, messages):
@@ -104,9 +93,9 @@ class AIClient:
                 model=self.model,
                 messages=messages,
                 stream=True,
-                max_tokens=500,  # 增加生成的token数量
-                temperature=0.7,  # 调整生成文本的多样性
-                timeout=60  # 设置超时时间
+                max_tokens=500,
+                temperature=0.7,
+                timeout=60
             )
             current_app.logger.debug("Successfully sent request to AI model")
             return response
@@ -114,13 +103,7 @@ class AIClient:
             self._handle_api_exception(e)
 
     def _handle_api_exception(self, e: Exception):
-        """
-        统一处理API异常
-
-        Args:
-            e: 异常对象
-        """
-        # 定义错误类型映射
+        """统一处理API异常"""
         error_mapping = {
             openai.APIConnectionError: "API连接错误",
             openai.AuthenticationError: "认证错误",
@@ -129,14 +112,12 @@ class AIClient:
             openai.InternalServerError: "内部错误"
         }
 
-        # 查找匹配的错误类型
         error_type = "API调用失败"
         for error_class, mapped_type in error_mapping.items():
             if isinstance(e, error_class):
                 error_type = mapped_type
                 break
 
-        # 处理OpenAI相关错误和其他异常
         if isinstance(e, openai.OpenAIError):
             error_msg = f"OpenAI API {error_type}: {str(e)}"
             current_app.logger.error(error_msg)
@@ -147,6 +128,51 @@ class AIClient:
             raise Exception(error_msg)
 
 
+def _extract_and_validate_request_data():
+    """提取并验证请求数据"""
+    data = request.get_json()
+    current_app.logger.debug(f"Received data: {data}")
+
+    if not data:
+        current_app.logger.error("No data received in request")
+        return None, jsonify({'error': '请求数据不能为空'}), 400
+
+    user_message = data.get('message', '')
+    history = data.get('history', [])
+
+    if not validate_user_message(user_message):
+        current_app.logger.debug("User message validation failed")
+        return None, jsonify({'error': '消息不能为空'}), 400
+
+    # 添加用户消息到历史记录
+    history.append({"role": "user", "content": user_message})
+    current_app.logger.debug(f"Updated history: {history}")
+
+    return (user_message, history), None, None
+
+
+def _create_stream_generator(history):
+    """创建流式响应生成器"""
+    def generate():
+        ai_client = AIClient()
+        stream = ai_client.get_completion_stream(history)
+
+        response_text = ""
+        for chunk in stream:
+            if chunk.choices and len(chunk.choices) > 0:
+                delta = chunk.choices[0].delta
+                if hasattr(delta, 'content') and delta.content is not None:
+                    content = delta.content  # 保留原始格式
+                    response_text += content
+                    yield f"data: {json.dumps({'response': content, 'done': False})}\n\n"
+
+        # 发送完成标志和完整历史
+        history.append({"role": "assistant", "content": response_text})
+        yield f"data: {json.dumps({'response': '', 'done': True, 'history': history})}\n\n"
+
+    return generate
+
+
 @ai_bp.route('/')
 def index():
     return render_template('ai/index.html')
@@ -154,40 +180,25 @@ def index():
 
 @ai_bp.route('/chat', methods=['POST'])
 def chat():
+    """处理聊天请求的主函数"""
     try:
         current_app.logger.debug("Chat endpoint called")
-        data = request.get_json()
-        current_app.logger.debug(f"Received data: {data}")
 
-        if not data:
-            current_app.logger.error("No data received in request")
-            return jsonify({'error': '请求数据不能为空'}), 400
+        # 提取和验证请求数据
+        data_result, error_response, status_code = _extract_and_validate_request_data()
+        if error_response:
+            return error_response, status_code
 
-        user_message = data.get('message', '')
-        history = data.get('history', [])
+        _, history = data_result
 
-        # 验证用户输入
-        if not validate_user_message(user_message):
-            current_app.logger.debug("User message validation failed")
-            return jsonify({'error': '消息不能为空'}), 400
+        # 创建流式响应
+        generate = _create_stream_generator(history)
+        return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
-        # 添加用户消息到历史记录
-        history.append({"role": "user", "content": user_message})
-        current_app.logger.debug(f"Updated history: {history}")
-
-        # 获取AI响应
-        response_text = get_ai_response(history)
-        current_app.logger.debug(f"AI response: {response_text}")
-
-        # 添加助手回复到历史记录
-        history.append({"role": "assistant", "content": response_text})
-
-        return jsonify({'response': response_text, 'history': history})
-    except openai.OpenAIError as e:  # 捕获 OpenAI 相关的异常
+    except openai.OpenAIError as e:
         current_app.logger.error(f'OpenAI API 调用失败: {str(e)}')
         return jsonify({'error': f'OpenAI API 调用失败: {str(e)}'}), 500
     except Exception as e:
-        # 强制输出到控制台（Docker logs 能捕获）
         print("=== AI 聊天接口错误 ===", file=sys.stderr)
         print(f"时间: {datetime.datetime.now()}", file=sys.stderr)
         print(f"错误信息: {str(e)}", file=sys.stderr)
@@ -210,15 +221,13 @@ def get_ai_response(history):
 
         response_text = ""
         for chunk in stream:
-            # 简化检查：仅关注有内容的chunk
             if chunk.choices and len(chunk.choices) > 0:
                 delta = chunk.choices[0].delta
                 if hasattr(delta, 'content') and delta.content is not None:
-                    response_text += delta.content.strip()  # 去除多余空白符
+                    response_text += delta.content.strip()
             else:
-                current_app.logger.debug(f"Ignoring empty chunk: {chunk}")  # 仅日志记录，不抛出异常
+                current_app.logger.debug(f"Ignoring empty chunk: {chunk}")
 
-        # 更严格的空响应检查
         if not response_text.strip():
             raise Exception("AI returned empty response. Please try again.")
 

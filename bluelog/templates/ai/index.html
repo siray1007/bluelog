@@ -47,34 +47,75 @@
             // 禁用发送按钮
             $('#send-btn').prop('disabled', true).text('发送中...');
             
-            // 发送请求到后端
-            $.ajax({
-                url: "{{ url_for('ai.chat') }}",
+            // 添加一个空的助手消息容器用于实时更新
+            let assistantMessageElement = $('<div class="message assistant-message"><div class="message-content"></div></div>');
+            $('#chat-history').append(assistantMessageElement);
+            scrollToBottom();
+            
+            let fullResponse = "";
+            
+            // 使用Fetch API处理流式响应
+            fetch("{{ url_for('ai.chat') }}", {
                 method: 'POST',
-                contentType: 'application/json',
-                data: JSON.stringify({
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
                     message: userMessage,
                     history: chatHistory
-                }),
-                success: function(data) {
-                    if (data.error) {
-                        addMessageToHistory('error', data.error);
-                    } else {
-                        // 添加AI回复到聊天历史
-                        addMessageToHistory('assistant', data.response);
-                        // 更新聊天历史
-                        chatHistory = data.history;
-                    }
-                },
-                error: function(xhr, status, error) {
-                    addMessageToHistory('error', '发送消息失败: ' + error);
-                },
-                complete: function() {
-                    // 重新启用发送按钮
-                    $('#send-btn').prop('disabled', false).text('发送');
-                    // 滚动到底部
-                    scrollToBottom();
+                })
+            }).then(response => {
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                function readStream() {
+                    return reader.read().then(({ done, value }) => {
+                        if (done) {
+                            // 完成后启用发送按钮
+                            $('#send-btn').prop('disabled', false).text('发送');
+                            return;
+                        }
+                        
+                        // 解码接收到的内容
+                        const chunk = decoder.decode(value, { stream: true });
+                        try {
+                            // 解析SSE格式的数据
+                            const lines = chunk.split('\n');
+                            for (const line of lines) {
+                                if (line.startsWith('data:')) {
+                                    const dataStr = line.substring(5).trim();
+                                    if (dataStr) {
+                                        const data = JSON.parse(dataStr);
+                                        
+                                        if (data.error) {
+                                            addMessageToHistory('error', data.error);
+                                            assistantMessageElement.remove();
+                                        } else if (!data.done) {
+                                            // 实时添加内容到助手消息
+                                            fullResponse += data.response;
+                                            assistantMessageElement.find('.message-content').text(fullResponse);
+                                        } else {
+                                            // 处理完成状态，更新聊天历史
+                                            chatHistory = data.history;
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.error('解析响应出错:', e);
+                        }
+                        
+                        scrollToBottom();
+                        return readStream();
+                    });
                 }
+                
+                return readStream();
+            }).catch(error => {
+                console.error('请求出错:', error);
+                addMessageToHistory('error', '发送消息失败: ' + error);
+                assistantMessageElement.remove();
+                $('#send-btn').prop('disabled', false).text('发送');
             });
         }
         
@@ -126,30 +167,35 @@
         margin-bottom: 15px;
         padding: 10px;
         border-radius: 5px;
+        max-width: 80%;
     }
     
     .user-message {
         background-color: #007bff;
         color: white;
-        margin-left: 20%;
+        margin-left: auto;
     }
     
     .assistant-message {
         background-color: #e9ecef;
         color: #212529;
-        margin-right: 20%;
+        margin-right: auto;
     }
     
     .system-message {
         background-color: #28a745;
         color: white;
         text-align: center;
+        margin-left: auto;
+        margin-right: auto;
     }
     
     .error-message {
         background-color: #dc3545;
         color: white;
         text-align: center;
+        margin-left: auto;
+        margin-right: auto;
     }
     
     .message-content {
